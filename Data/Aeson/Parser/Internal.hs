@@ -206,7 +206,10 @@ jstring = A.word8 DOUBLE_QUOTE *> jstring_
 -- | Parse a string without a leading quote.
 jstring_ :: Parser Text
 {-# INLINE jstring_ #-}
-jstring_ = {-# SCC "jstring_" #-} do
+jstring_ = {-# SCC "jstring_" #-} 
+  unescapeText
+
+{-
   s <- A.scan startState go <* A.anyWord8
   case unescapeText s of
     Right r  -> return r
@@ -230,6 +233,7 @@ data S = S Int#
                     in Just a'
       where backslash = BACKSLASH
 #endif
+-}
 
 decodeWith :: Parser Value -> (Value -> Result a) -> L.ByteString -> Maybe a
 decodeWith p to s =

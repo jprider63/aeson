@@ -1,6 +1,7 @@
 {-# LANGUAGE ForeignFunctionInterface #-}
 {-# LANGUAGE MagicHash                #-}
 {-# LANGUAGE UnliftedFFITypes         #-}
+{-# LANGUAGE Strict                   #-}
 
 module Data.Aeson.Parser.Unescape (
   unescapeText
@@ -127,8 +128,8 @@ decodeHex 102 = 15 -- 'f'
 decodeHex _ = throwDecodeError
 {-# INLINE decodeHex #-}
 
-unescapeText' :: ByteString -> Text
-unescapeText' bs = runText $ \done -> do
+unescapeText :: Parser Text
+unescapeText bs = runText $ \done -> do
     dest <- A.new len
     (pos, finalState) <- B.foldl' (f' dest) (return (0, StateNone)) bs
 
@@ -235,7 +236,7 @@ unescapeText' bs = runText $ \done -> do
 
       {-# INLINE f #-}
 
-{-# INLINE unescapeText' #-}
+{-# INLINE unescapeText #-}
 
 write dest pos char =
   A.unsafeWrite dest pos char
