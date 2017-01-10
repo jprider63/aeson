@@ -9,6 +9,8 @@ module Data.Aeson.Parser.Unescape (
 
 import           Control.Exception          (evaluate, throw, try)
 import           Control.Monad              (when)
+import           Data.Attoparsec.ByteString.Char8 (Parser)
+import qualified Data.Attoparsec.ByteString as A
 import           Data.ByteString            as B
 import           Data.Bits                  (shiftL, shiftR, (.&.), (.|.))
 import           Data.Text                  (Text)
@@ -129,68 +131,89 @@ decodeHex _ = throwDecodeError
 {-# INLINE decodeHex #-}
 
 unescapeText :: Parser Text
-unescapeText bs = runText $ \done -> do
-    dest <- A.new len
-    (pos, finalState) <- B.foldl' (f' dest) (return (0, StateNone)) bs
+unescapeText = do
+    -- (dest, pos, finalState)
+    loop (A.new len >>= \dest -> return (dest, 0)) StateNone
 
     -- Check final state.
-    when ( finalState /= StateNone)
-      throwDecodeError
+    -- when ( finalState /= StateNone)
+    --   throwDecodeError
 
-    done dest pos -- TODO: pos, pos-1??? XXX
+    -- return $ runText $ \done -> do
+    --   done dest pos
 
     where
-      len = B.length bs
+      len = 10000 -- TODO: B.length bs XXX
 
-      runUtf dest pos st point c = case decode st point c of
+      loop m state = do
+        c <- A.anyWord8
+        resM <- f m state c
+        case resM of
+          Nothing ->
+            -- TODO: Check final state. Not necessary here? XXX
+            -- error "TODO"
+
+            return $ runText $ \done -> do
+              (dest, pos) <- m
+              done dest pos
+
+          Just (m', state') -> 
+            loop m' state'
+
+      runUtf m st point c = case decode st point c of
         (UtfGround, 92) -> -- \
-            return (pos, StateBackslash)
+            return $ Just (m, StateBackslash)
         (UtfGround, w) | w <= 0xffff -> 
-            writeAndReturn dest pos (fromIntegral w) StateNone
-        (UtfGround, w) -> do
-            write dest pos (0xd7c0 + fromIntegral (w `shiftR` 10))
-            writeAndReturn dest (pos + 1) (0xdc00 + fromIntegral (w .&. 0x3ff)) StateNone
+            writeAndReturn m (fromIntegral w) StateNone
+        (UtfGround, w) -> 
+            writeAndReturn 
+              (write m (0xd7c0 + fromIntegral (w `shiftR` 10)))
+              (0xdc00 + fromIntegral (w .&. 0x3ff))
+              StateNone
         (st, p) -> 
-            return (pos, StateUtf st p)
+            return $ Just (m, StateUtf st p)
 
       {-# INLINE runUtf #-}
 
-      f' dest m c = m >>= \s -> f dest s c
+      -- f' dest m c = m >>= \s -> f dest s c
 
-      {-# INLINE f' #-}
+      -- {-# INLINE f' #-}
+
+      -- Hit closing quote.
+      f m StateNone 34 = return Nothing
 
       -- No pending state.
-      f dest (pos, StateNone) c = runUtf dest pos UtfGround 0 c
+      f m StateNone c = runUtf m UtfGround 0 c
 
       -- In the middle of parsing a UTF string.
-      f dest (pos, StateUtf st point) c = runUtf dest pos st point c
+      f m (StateUtf st point) c = runUtf m st point c
 
       -- In the middle of escaping a backslash.
-      f dest (pos, StateBackslash)  34 = writeAndReturn dest pos 34 StateNone -- "
-      f dest (pos, StateBackslash)  92 = writeAndReturn dest pos 92 StateNone -- \
-      f dest (pos, StateBackslash)  47 = writeAndReturn dest pos 47 StateNone -- /
-      f dest (pos, StateBackslash)  98 = writeAndReturn dest pos  8 StateNone -- b
-      f dest (pos, StateBackslash) 102 = writeAndReturn dest pos 12 StateNone -- f
-      f dest (pos, StateBackslash) 110 = writeAndReturn dest pos 10 StateNone -- n
-      f dest (pos, StateBackslash) 114 = writeAndReturn dest pos 13 StateNone -- r
-      f dest (pos, StateBackslash) 116 = writeAndReturn dest pos  9 StateNone -- t
-      f dest (pos, StateBackslash) 117 = return (pos, StateU0)                -- u
-      f dest (pos, StateBackslash) _   = throwDecodeError
+      f m StateBackslash  34 = writeAndReturn m 34 StateNone -- "
+      f m StateBackslash  92 = writeAndReturn m 92 StateNone -- \
+      f m StateBackslash  47 = writeAndReturn m 47 StateNone -- /
+      f m StateBackslash  98 = writeAndReturn m  8 StateNone -- b
+      f m StateBackslash 102 = writeAndReturn m 12 StateNone -- f
+      f m StateBackslash 110 = writeAndReturn m 10 StateNone -- n
+      f m StateBackslash 114 = writeAndReturn m 13 StateNone -- r
+      f m StateBackslash 116 = writeAndReturn m  9 StateNone -- t
+      f m StateBackslash 117 = return $ Just (m, StateU0)           -- u
+      f m StateBackslash _   = throwDecodeError
 
       -- Processing '\u'.
-      f _ (pos, StateU0) c = 
+      f m StateU0 c = 
         let w = decodeHex c in
-        return (pos, StateU1 (w `shiftL` 12))
+        return $ Just (m, StateU1 (w `shiftL` 12))
 
-      f _ (pos, StateU1 w') c = 
+      f m (StateU1 w') c = 
         let w = decodeHex c in
-        return (pos, StateU2 (w' .|. (w `shiftL` 8)))
+        return $ Just (m, StateU2 (w' .|. (w `shiftL` 8)))
 
-      f _ (pos, StateU2 w') c = 
+      f m (StateU2 w') c = 
         let w = decodeHex c in
-        return (pos, StateU3 (w' .|. (w `shiftL` 4)))
+        return $ Just (m, StateU3 (w' .|. (w `shiftL` 4)))
 
-      f dest (pos, StateU3 w') c = 
+      f m (StateU3 w') c = 
         let w = decodeHex c in
         let u = w' .|. w in
 
@@ -203,28 +226,28 @@ unescapeText bs = runText $ \done -> do
               else
                 StateNone
         in
-        writeAndReturn dest pos u st
+        writeAndReturn m u st
 
       -- Handle surrogates.
-      f _ (pos, StateS0) 92 = return (pos, StateS1) -- \
-      f _ (  _, StateS0)  _ = throwDecodeError
+      f m StateS0 92 = return $ Just (m, StateS1) -- \
+      f _ StateS0  _ = throwDecodeError
 
-      f _ (pos, StateS1) 117 = return (pos, StateSU0) -- u
-      f _ (  _, StateS1)   _ = throwDecodeError
+      f m StateS1 117 = return $ Just (m, StateSU0) -- u
+      f _ StateS1   _ = throwDecodeError
 
-      f _ (pos, StateSU0) c = 
+      f m StateSU0 c = 
         let w = decodeHex c in
-        return (pos, StateSU1 (w `shiftL` 12))
+        return $ Just (m, StateSU1 (w `shiftL` 12))
 
-      f _ (pos, StateSU1 w') c = 
+      f m (StateSU1 w') c = 
         let w = decodeHex c in
-        return (pos, StateSU2 (w' .|. (w `shiftL` 8)))
+        return $ Just (m, StateSU2 (w' .|. (w `shiftL` 8)))
 
-      f _ (pos, StateSU2 w') c = 
+      f m (StateSU2 w') c = 
         let w = decodeHex c in
-        return (pos, StateSU3 (w' .|. (w `shiftL` 4)))
+        return $ Just (m, StateSU3 (w' .|. (w `shiftL` 4)))
 
-      f dest (pos, StateSU3 w') c = 
+      f m (StateSU3 w') c = 
         let w = decodeHex c in
         let u = w' .|. w in
 
@@ -232,19 +255,20 @@ unescapeText bs = runText $ \done -> do
         if u < 0xdc00 || u > 0xdfff then
           throwDecodeError
         else
-          writeAndReturn dest pos u StateNone
+          writeAndReturn m u StateNone
 
       {-# INLINE f #-}
 
 {-# INLINE unescapeText #-}
 
-write dest pos char =
+write m char = do
+  (dest, pos) <- m
   A.unsafeWrite dest pos char
+  return (dest, pos + 1)
 {-# INLINE write #-}
 
-writeAndReturn dest pos char res = do
-  write dest pos char
-  return (pos + 1, res)
+writeAndReturn m char res = 
+  return $ Just (write m char, res)
 {-# INLINE writeAndReturn #-}
       
 throwDecodeError :: a
@@ -298,6 +322,6 @@ unescapeText' (PS fp off len) = runText $ \done -> do
 {-# INLINE unescapeText' #-}
 -}
 
-unescapeText :: ByteString -> Either UnicodeException Text
-unescapeText = unsafeDupablePerformIO . try . evaluate . unescapeText'
-{-# INLINE unescapeText #-}
+-- unescapeText :: ByteString -> Either UnicodeException Text
+-- unescapeText = unsafeDupablePerformIO . try . evaluate . unescapeText'
+-- {-# INLINE unescapeText #-}
