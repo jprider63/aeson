@@ -177,7 +177,7 @@ unescapeText' bs = runText $ \done -> do
 
       -- f' dest !m c = m `bind` \(!s) -> f dest s c
 
-      loop dest ps i | i >= len = return ps
+      loop _ ps i | i >= len = return ps
       loop dest ps@(!_pos, !_st) i = do
         let c = B.index bs i -- JP: We can use unsafe index once we prove bounds with Liquid Haskell.
         ps' <- f dest ps c
