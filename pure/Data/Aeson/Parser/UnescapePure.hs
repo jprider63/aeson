@@ -171,7 +171,9 @@ unescapeText' bs = runText $ \done -> do
         (st', p) ->
             return (pos, StateUtf st' p)
 
-      f' dest !m c = m >>= \(!s) -> f dest s c
+      bind !m !f = m >>= f
+
+      f' dest !m c = m `bind` \(!s) -> f dest s c
 
       -- No pending state.
       f dest (pos, StateNone) c = runUtf dest pos UtfGround 0 c
