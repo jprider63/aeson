@@ -149,7 +149,9 @@ unescapeText' :: ByteString -> Text
 unescapeText' bs = runText $ \done -> do
     dest <- A.new len
 
-    (!pos, !finalState) <- B.foldl' (f' dest) (return (0, StateNone)) bs
+    -- (!pos, !finalState) <- B.foldl' (f' dest) (return (0, StateNone)) bs
+
+    (!pos, !finalState) <- loop dest (0, StateNone) 0
 
     -- Check final state. Currently pos gets only increased over time, so this check should catch overflows.
     when ( finalState /= StateNone || pos > len)
@@ -171,9 +173,15 @@ unescapeText' bs = runText $ \done -> do
         (st', p) ->
             return (pos, StateUtf st' p)
 
-      bind !m !f = m >>= f
+      -- bind !m !f = m >>= f
 
-      f' dest !m c = m `bind` \(!s) -> f dest s c
+      -- f' dest !m c = m `bind` \(!s) -> f dest s c
+
+      loop dest ps i | i >= len = return ps
+      loop dest ps@(!_pos, !_st) i = do
+        let c = B.index bs i -- JP: We can use unsafe index once we prove bounds with Liquid Haskell.
+        ps' <- f dest ps c
+        loop dest ps' $ i+1
 
       -- No pending state.
       f dest (pos, StateNone) c = runUtf dest pos UtfGround 0 c
