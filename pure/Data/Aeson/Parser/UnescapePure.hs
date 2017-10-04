@@ -149,7 +149,7 @@ unescapeText' :: ByteString -> Text
 unescapeText' bs = runText $ \done -> do
     dest <- A.new len
 
-    (pos, finalState) <- B.foldl' (f' dest) (return (0, StateNone)) bs
+    (!pos, !finalState) <- B.foldl' (f' dest) (return (0, StateNone)) bs
 
     -- Check final state. Currently pos gets only increased over time, so this check should catch overflows.
     when ( finalState /= StateNone || pos > len)
@@ -171,7 +171,9 @@ unescapeText' bs = runText $ \done -> do
         (st', p) ->
             return (pos, StateUtf st' p)
 
-      f' dest !m c = m >>= \(!s) -> f dest s c
+      bind !m !f = m >>= f
+
+      f' dest !m c = m `bind` \(!s) -> f dest s c
 
       -- No pending state.
       f dest (pos, StateNone) c = runUtf dest pos UtfGround 0 c
