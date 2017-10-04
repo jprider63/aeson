@@ -1,3 +1,4 @@
+{-# LANGUAGE BangPatterns #-}
 -- WARNING: This file is security sensitive as it uses unsafeWrite which does
 -- not check bounds. Any changes should be made with care and we would love to
 -- get informed about them, just cc us in any PR targetting this file: @eskimor @jprider63
@@ -174,7 +175,7 @@ unescapeText' bs = runText $ \done -> do
 
       {-# INLINE runUtf #-}
 
-      f' dest m c = m >>= \s -> f dest s c
+      f' dest !m c = m >>= \(!s) -> f dest s c
 
       {-# INLINE f' #-}
 
