@@ -1,4 +1,3 @@
-{-# LANGUAGE BangPatterns #-}
 -- WARNING: This file is security sensitive as it uses unsafeWrite which does
 -- not check bounds. Any changes should be made with care and we would love to
 -- get informed about them, just cc us in any PR targetting this file: @eskimor @jprider63
@@ -149,8 +148,6 @@ unescapeText' :: ByteString -> Text
 unescapeText' bs = runText $ \done -> do
     dest <- A.new len
 
-    -- (!pos, !finalState) <- B.foldl' (f' dest) (return (0, StateNone)) bs
-
     (pos, finalState) <- loop dest (0, StateNone) 0
 
     -- Check final state. Currently pos gets only increased over time, so this check should catch overflows.
@@ -173,12 +170,8 @@ unescapeText' bs = runText $ \done -> do
         (st', p) ->
             return (pos, StateUtf st' p)
 
-      -- bind !m !f = m >>= f
-
-      -- f' dest !m c = m `bind` \(!s) -> f dest s c
-
       loop _ ps i | i >= len = return ps
-      loop dest ps@(_pos, _st) i = do
+      loop dest ps i = do
         let c = B.index bs i -- JP: We can use unsafe index once we prove bounds with Liquid Haskell.
         ps' <- f dest ps c
         loop dest ps' $ i+1
