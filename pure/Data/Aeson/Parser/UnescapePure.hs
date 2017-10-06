@@ -151,7 +151,7 @@ unescapeText' bs = runText $ \done -> do
 
     -- (!pos, !finalState) <- B.foldl' (f' dest) (return (0, StateNone)) bs
 
-    (!pos, !finalState) <- loop dest (0, StateNone) 0
+    (pos, finalState) <- loop dest (0, StateNone) 0
 
     -- Check final state. Currently pos gets only increased over time, so this check should catch overflows.
     when ( finalState /= StateNone || pos > len)
@@ -178,7 +178,7 @@ unescapeText' bs = runText $ \done -> do
       -- f' dest !m c = m `bind` \(!s) -> f dest s c
 
       loop _ ps i | i >= len = return ps
-      loop dest ps@(!_pos, !_st) i = do
+      loop dest ps@(_pos, _st) i = do
         let c = B.index bs i -- JP: We can use unsafe index once we prove bounds with Liquid Haskell.
         ps' <- f dest ps c
         loop dest ps' $ i+1
