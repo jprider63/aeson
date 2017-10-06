@@ -1,3 +1,4 @@
+{-# OPTIONS_GHC -auto-all -caf-all #-}
 -- WARNING: This file is security sensitive as it uses unsafeWrite which does
 -- not check bounds. Any changes should be made with care and we would love to
 -- get informed about them, just cc us in any PR targetting this file: @eskimor @jprider63
@@ -159,7 +160,7 @@ unescapeText' bs = runText $ \done -> do
     where
       len = B.length bs
 
-      runUtf dest pos st point c = case decode st point c of
+      runUtf dest pos st point c = case {-# SCC decode #-} decode st point c of
         (UtfGround, 92) -> -- Backslash
             return (pos, StateBackslash)
         (UtfGround, w) | w <= 0xffff ->
@@ -174,7 +175,7 @@ unescapeText' bs = runText $ \done -> do
       loop _ ps i | i >= len = return ps
       loop dest ps i = do
         let c = B.index bs i -- JP: We can use unsafe index once we prove bounds with Liquid Haskell.
-        ps' <- f dest ps c
+        ps' <- {-# SCC f #-} f dest ps c
         loop dest ps' $ i+1
 
       -- No pending state.
