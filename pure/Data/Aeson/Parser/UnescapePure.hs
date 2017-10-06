@@ -144,11 +144,13 @@ decodeHex 70  = 15 -- 'F'
 decodeHex 102 = 15 -- 'f'
 decodeHex _ = throwDecodeError
 
+type NextFunction = A.MArray s -> Int -> Word8 -> ST s (Int, Maybe NextFunction)
+
 unescapeText' :: ByteString -> Text
 unescapeText' bs = runText $ \done -> do
     dest <- A.new len
 
-    (pos, finalState) <- loop dest (0, StateNone) 0
+    (pos, finalState) <- loop dest (0, Nothing) 0
 
     -- Check final state. Currently pos gets only increased over time, so this check should catch overflows.
     when ( finalState /= StateNone || pos > len)
@@ -161,37 +163,40 @@ unescapeText' bs = runText $ \done -> do
 
       runUtf dest pos st point c = case decode st point c of
         (UtfGround, 92) -> -- Backslash
-            return (pos, StateBackslash)
+            return (pos, fStateBackslash)
         (UtfGround, w) | w <= 0xffff ->
-            writeAndReturn dest pos (fromIntegral w) StateNone
+            writeAndReturn dest pos (fromIntegral w) fStateNone
         (UtfGround, w) -> do
             write dest pos (0xd7c0 + fromIntegral (w `shiftR` 10))
-            writeAndReturn dest (pos + 1) (0xdc00 + fromIntegral (w .&. 0x3ff)) StateNone
+            writeAndReturn dest (pos + 1) (0xdc00 + fromIntegral (w .&. 0x3ff)) fStateNone
         (st', p) ->
-            return (pos, StateUtf st' p)
+            return (pos, fStateUtf st' p)
 
-      loop :: A.MArray s -> (Int, State) -> Int -> ST s (Int, State)
+      loop :: A.MArray s -> (Int, Maybe NextFunction) -> Int -> ST s (Int, Maybe NextFunction)
       loop _ ps i | i >= len = return ps
-      loop dest ps i = do
+      loop dest (pos, f') i = do
         let c = B.index bs i -- JP: We can use unsafe index once we prove bounds with Liquid Haskell.
-        ps' <- f dest ps c
+        let f = maybe fStateNone' id f'
+        ps' <- f dest pos c
         loop dest ps' $ i+1
 
       -- No pending state.
-      f dest (pos, StateNone) c = runUtf dest pos UtfGround 0 c
+      fStateNone = Nothing
+      fStateNone' dest pos c = runUtf dest pos UtfGround 0 c
+      -- f dest (pos, StateNone) c = runUtf dest pos UtfGround 0 c
 
       -- In the middle of parsing a UTF string.
       f dest (pos, StateUtf st point) c = runUtf dest pos st point c
 
       -- In the middle of escaping a backslash.
-      f dest (pos, StateBackslash)  34 = writeAndReturn dest pos 34 StateNone -- "
-      f dest (pos, StateBackslash)  92 = writeAndReturn dest pos 92 StateNone -- Backslash
-      f dest (pos, StateBackslash)  47 = writeAndReturn dest pos 47 StateNone -- /
-      f dest (pos, StateBackslash)  98 = writeAndReturn dest pos  8 StateNone -- b
-      f dest (pos, StateBackslash) 102 = writeAndReturn dest pos 12 StateNone -- f
-      f dest (pos, StateBackslash) 110 = writeAndReturn dest pos 10 StateNone -- n
-      f dest (pos, StateBackslash) 114 = writeAndReturn dest pos 13 StateNone -- r
-      f dest (pos, StateBackslash) 116 = writeAndReturn dest pos  9 StateNone -- t
+      fStateBackslash dest pos c 34 = writeAndReturn dest pos 34 fStateNone -- "
+      fStateBackslash dest pos StateBackslash 92 = writeAndReturn dest pos 92 fStateNone -- Backslash
+      f dest (pos, StateBackslash)  47 = writeAndReturn dest pos 47 fStateNone -- /
+      f dest (pos, StateBackslash)  98 = writeAndReturn dest pos  8 fStateNone -- b
+      f dest (pos, StateBackslash) 102 = writeAndReturn dest pos 12 fStateNone -- f
+      f dest (pos, StateBackslash) 110 = writeAndReturn dest pos 10 fStateNone -- n
+      f dest (pos, StateBackslash) 114 = writeAndReturn dest pos 13 fStateNone -- r
+      f dest (pos, StateBackslash) 116 = writeAndReturn dest pos  9 fStateNone -- t
       f    _ (pos, StateBackslash) 117 = return (pos, StateU0)                -- u
       f    _ (  _, StateBackslash) _   = throwDecodeError
 
